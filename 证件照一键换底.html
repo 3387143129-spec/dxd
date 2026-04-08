@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>证件照一键换背景神器</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Selfie Segmentation -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        techDark: '#0B1120',
+                        techPanel: '#1E293B',
+                        techPrimary: '#00F3FF',
+                        idBlue: '#428EDB',
+                        idRed: '#FE0100',
+                        idWhite: '#FFFFFF'
+                    },
+                    boxShadow: {
+                        'neon': '0 0 15px rgba(0, 243, 255, 0.5)',
+                        'neon-strong': '0 0 25px rgba(0, 243, 255, 0.8)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #0B1120;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(0, 243, 255, 0.08), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(66, 142, 219, 0.08), transparent 25%);
+            color: white;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            min-height: 100vh;
+        }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .upload-area {
+            border: 2px dashed rgba(0, 243, 255, 0.4);
+            transition: all 0.3s ease;
+        }
+        
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #00F3FF;
+            background: rgba(0, 243, 255, 0.05);
+            box-shadow: inset 0 0 20px rgba(0, 243, 255, 0.1);
+        }
+
+        .color-btn {
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        
+        .color-btn.active {
+            transform: scale(1.05);
+            border-color: #00F3FF;
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.6);
+        }
+
+        #canvas-container {
+            position: relative;
+            background: repeating-conic-gradient(#1E293B 0% 25%, #0B1120 0% 50%) 50% / 20px 20px;
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 4px solid rgba(0, 243, 255, 0.1);
+            border-top: 4px solid #00F3FF;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 隐藏的文件输入框 */
+        #file-input {
+            display: none;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 flex flex-col items-center justify-center">
+
+    <!-- Header -->
+    <header class="text-center mb-8 mt-4">
+        <h1 class="text-4xl md:text-5xl font-bold tracking-wider mb-2 text-transparent bg-clip-text bg-gradient-to-r from-techPrimary to-blue-500 shadow-neon-text">
+            证件照一键换背景神器
+        </h1>
+        <p class="text-gray-400 mt-3 text-sm md:text-base">基于边缘AI运算，本地极速处理，100%保护隐私</p>
+    </header>
+
+    <!-- Main Content -->
+    <main class="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 relative">
+        
+        <!-- 全局加载遮罩层 -->
+        <div id="loading-overlay" class="absolute inset-0 z-50 bg-techDark/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl hidden">
+            <div class="loader mb-4"></div>
+            <p id="loading-text" class="text-techPrimary font-medium animate-pulse">正在初始化AI模型 (首次加载需几秒钟)...</p>
+        </div>
+
+        <!-- Left Column: Controls -->
+        <div class="lg:col-span-5 flex flex-col gap-6">
+            
+            <!-- Upload Panel -->
+            <div class="glass-panel rounded-2xl p-6 shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="w-2 h-6 bg-techPrimary rounded-full mr-3 shadow-neon"></span>
+                    1. 上传照片
+                </h2>
+                
+                <label for="file-input" class="upload-area rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer group">
+                    <svg class="w-12 h-12 text-gray-400 group-hover:text-techPrimary transition-colors duration-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                    </svg>
+                    <span class="text-gray-300 group-hover:text-white transition-colors">点击或拖拽上传人像照片</span>
+                    <span class="text-xs text-gray-500 mt-2">支持 JPG, PNG 格式 (建议上传上半身清晰照)</span>
+                </label>
+                <input type="file" id="file-input" accept="image/png, image/jpeg, image/jpg">
+            </div>
+
+            <!-- Color Selection Panel -->
+            <div class="glass-panel rounded-2xl p-6 shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="w-2 h-6 bg-techPrimary rounded-full mr-3 shadow-neon"></span>
+                    2. 选择底色
+                </h2>
+                
+                <div class="grid grid-cols-3 gap-4">
+                    <button class="color-btn active flex flex-col items-center justify-center py-4 rounded-xl bg-techPanel hover:bg-slate-700" data-color="#428EDB">
+                        <div class="w-10 h-10 rounded-full bg-idBlue shadow-md mb-2 border border-gray-600"></div>
+                        <span class="text-sm font-medium">蓝底</span>
+                        <span class="text-xs text-gray-400 mt-1">#428EDB</span>
+                    </button>
+                    <button class="color-btn flex flex-col items-center justify-center py-4 rounded-xl bg-techPanel hover:bg-slate-700" data-color="#FE0100">
+                        <div class="w-10 h-10 rounded-full bg-idRed shadow-md mb-2 border border-gray-600"></div>
+                        <span class="text-sm font-medium">红底</span>
+                        <span class="text-xs text-gray-400 mt-1">#FE0100</span>
+                    </button>
+                    <button class="color-btn flex flex-col items-center justify-center py-4 rounded-xl bg-techPanel hover:bg-slate-700" data-color="#FFFFFF">
+                        <div class="w-10 h-10 rounded-full bg-idWhite shadow-md mb-2 border border-gray-300"></div>
+                        <span class="text-sm font-medium text-gray-300">白底</span>
+                        <span class="text-xs text-gray-400 mt-1">#FFFFFF</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Download Panel -->
+            <div class="glass-panel rounded-2xl p-6 shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="w-2 h-6 bg-techPrimary rounded-full mr-3 shadow-neon"></span>
+                    3. 保存结果
+                </h2>
+                <button id="download-btn" class="w-full py-4 rounded-xl font-bold text-lg text-techDark bg-gradient-to-r from-techPrimary to-blue-400 hover:from-blue-400 hover:to-techPrimary transition-all duration-300 shadow-neon opacity-50 cursor-not-allowed flex items-center justify-center gap-2" disabled>
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    下载证件照
+                </button>
+            </div>
+
+        </div>
+
+        <!-- Right Column: Preview Area -->
+        <div class="lg:col-span-7 glass-panel rounded-2xl p-6 shadow-lg flex flex-col h-full min-h-[500px]">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold flex items-center">
+                    <span class="w-2 h-6 bg-techPrimary rounded-full mr-3 shadow-neon"></span>
+                    实时预览
+                </h2>
+                <span class="text-xs px-3 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">AI 就绪</span>
+            </div>
+            
+            <div id="canvas-container" class="flex-grow w-full border border-gray-700 flex items-center justify-center p-4">
+                <!-- 占位提示 -->
+                <div id="placeholder-text" class="text-gray-500 text-center flex flex-col items-center">
+                    <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                    </svg>
+                    上传照片后将在此处显示预览
+                </div>
+                <!-- 渲染画布 -->
+                <canvas id="output-canvas" class="max-w-full max-h-full object-contain hidden shadow-2xl"></canvas>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-12 text-center text-gray-500 text-sm pb-8">
+        <p>© 2026 证件照一键换背景神器 | 本地处理，不上传任何照片</p>
+    </footer>
+
+    <!-- Logic Script -->
+    <script>
+        // --- 核心变量 ---
+        let currentBgColor = '#428EDB'; // 默认蓝底
+        let originalImage = null;       // 原图对象
+        let currentResults = null;      // MediaPipe 处理结果（Mask）
+        let selfieSegmentation = null;  // MediaPipe 实例
+
+        // --- DOM 元素 ---
+        const fileInput = document.getElementById('file-input');
+        const uploadArea = document.querySelector('.upload-area');
+        const colorBtns = document.querySelectorAll('.color-btn');
+        const canvas = document.getElementById('output-canvas');
+        const canvasCtx = canvas.getContext('2d');
+        const placeholderText = document.getElementById('placeholder-text');
+        const downloadBtn = document.getElementById('download-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingText = document.getElementById('loading-text');
+
+        // --- 1. 初始化 MediaPipe 模型 ---
+        function initModel() {
+            showLoading("正在初始化 AI 模型...");
+            
+            selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+            }});
+            
+            selfieSegmentation.setOptions({
+                modelSelection: 0, // 0 适合通用人体，抠图边缘更精准
+            });
+            
+            selfieSegmentation.onResults(onSegmented);
+
+            // 预热模型（通过发送一个空白的小图片）
+            const warmupCanvas = document.createElement('canvas');
+            warmupCanvas.width = 10;
+            warmupCanvas.height = 10;
+            selfieSegmentation.send({image: warmupCanvas}).then(() => {
+                hideLoading();
+                console.log("模型初始化成功！");
+            }).catch(err => {
+                hideLoading();
+                alert("模型加载失败，请检查网络连接或刷新页面重试。");
+                console.error(err);
+            });
+        }
+
+        window.onload = initModel;
+
+        // --- 2. 处理图片上传 ---
+        fileInput.addEventListener('change', handleFileSelect);
+        
+        // 拖拽上传支持
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        function handleFileSelect(e) {
+            if (e.target.files && e.target.files[0]) {
+                handleFile(e.target.files[0]);
+            }
+        }
+
+        function handleFile(file) {
+            if (!file.type.match('image.*')) {
+                alert("请上传图片文件 (JPG / PNG)");
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                originalImage = new Image();
+                originalImage.onload = () => {
+                    // 图片加载完成后开始 AI 处理
+                    processImage();
+                };
+                originalImage.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // --- 3. 运行 AI 抠图 ---
+        async function processImage() {
+            if (!originalImage || !selfieSegmentation) return;
+            
+            showLoading("AI 正在高精度抠图中...");
+            
+            // 设置 Canvas 真实尺寸与原图一致，保证高清下载
+            canvas.width = originalImage.width;
+            canvas.height = originalImage.height;
+            
+            try {
+                // 发送图片给模型处理
+                await selfieSegmentation.send({image: originalImage});
+            } catch (error) {
+                console.error(error);
+                alert("图片处理失败，请重试。");
+                hideLoading();
+            }
+        }
+
+        // --- 4. 渲染处理结果（核心抠图+换底色逻辑） ---
+        function onSegmented(results) {
+            currentResults = results; // 保存掩码结果，便于后续换色
+            renderCanvas();
+            
+            // UI 更新
+            placeholderText.classList.add('hidden');
+            canvas.classList.remove('hidden');
+            downloadBtn.disabled = false;
+            downloadBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            downloadBtn.classList.add('hover:scale-[1.02]');
+            
+            hideLoading();
+        }
+
+        function renderCanvas() {
+            if (!currentResults) return;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 【边缘优化核心逻辑】
+            // 使用离屏 Canvas 对掩码进行“收缩(Choke)”处理，去除原图背景色溢出(杂边/白边)
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = canvas.width;
+            maskCanvas.height = canvas.height;
+            const maskCtx = maskCanvas.getContext('2d');
+            
+            // 1. 绘制初始 AI 分割掩码
+            maskCtx.drawImage(currentResults.segmentationMask, 0, 0, canvas.width, canvas.height);
+            
+            // 2. 魔法算法：利用 source-in 叠加自身，使边缘的半透明 Alpha 值相乘衰减 
+            // (例如：0.6 * 0.6 = 0.36，而实体部分的 1.0 * 1.0 依然是 1.0)
+            // 这会让半透明的过渡边缘向内收缩，有效“切掉”粘连的原图背景色
+            maskCtx.globalCompositeOperation = 'source-in';
+            maskCtx.drawImage(currentResults.segmentationMask, 0, 0, canvas.width, canvas.height);
+            maskCtx.drawImage(currentResults.segmentationMask, 0, 0, canvas.width, canvas.height); // 第二次叠加，进一步收缩杂边
+
+            // 3. 将优化过边缘的掩码画到主画布
+            canvasCtx.drawImage(maskCanvas, 0, 0, canvas.width, canvas.height);
+
+            // 4. 只在收缩后的掩码区域内绘制原图
+            canvasCtx.globalCompositeOperation = 'source-in';
+            canvasCtx.drawImage(currentResults.image, 0, 0, canvas.width, canvas.height);
+
+            // 5. 最后在人物背后铺上底色
+            canvasCtx.globalCompositeOperation = 'destination-over';
+            canvasCtx.fillStyle = currentBgColor;
+            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+            canvasCtx.restore();
+        }
+
+        // --- 5. 交互：切换底色 ---
+        colorBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                // 移除所有激活状态
+                colorBtns.forEach(b => b.classList.remove('active'));
+                // 激活当前按钮
+                btn.classList.add('active');
+                
+                // 更新颜色并重新渲染
+                currentBgColor = btn.getAttribute('data-color');
+                if (currentResults) {
+                    renderCanvas(); // 直接使用已有的AI结果重新渲染，瞬间完成
+                }
+            });
+        });
+
+        // --- 6. 交互：下载图片 ---
+        downloadBtn.addEventListener('click', () => {
+            if (!currentResults) return;
+            
+            // 将 canvas 转换为高清 PNG 数据
+            const dataURL = canvas.toDataURL('image/png', 1.0);
+            
+            // 创建虚拟链接并触发下载
+            const link = document.createElement('a');
+            const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,"");
+            link.download = `证件照_${dateStr}.png`;
+            link.href = dataURL;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        // --- 辅助工具函数 ---
+        function showLoading(text) {
+            loadingText.innerText = text;
+            loadingOverlay.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            loadingOverlay.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
